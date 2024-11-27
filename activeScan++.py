@@ -81,16 +81,7 @@ class PerHostScans(IScannerCheck):
         issues = []  #Bulunan sorunların listesi.
         issues.extend(self.interestingFileScan(basePair))  #İlginç dosya tarama sonuçları eklenir.
         return issues  #Bulunan tüm sorunlar döndürülür.
-
-    interestingFileMappings = [  #Bakılması gereken ilginç şeylerin tutulduğu yer.
-        #[host-relative-url, vulnerable_response_content, reason]
-            ['/.git/config', '[core]', 'source code leak?'],
-            ['/server-status', 'Server uptime', 'debug info'],
-            ['/.well-known/apple-app-site-association', 'applinks', 'https://developer.apple.com/library/archive/documentation/General/Conceptual/AppSearch/UniversalLinks.html'],
-            ['/.well-known/openid-configuration', '"authorization_endpoint"', 'https://portswigger.net/research/hidden-oauth-attack-vectors'],
-            ['/.well-known/oauth-authorization-server', '"authorization_endpoint"', 'https://portswigger.net/research/hidden-oauth-attack-vectors'],
-            ['/users/confirmation', 'onfirmation token', 'Websites using the Devise framework often have a race condition enabling email forgery: https://portswigger.net/research/smashing-the-state-machine'],
-    ]
+        
     interestingFileMappings2 = [
         #Sürüm kontrol sistemleri ve kaynak kod sızıntıları
         ['/.git/config', '[core]', 'source code leak?'],    #Git sürüm kontrol sistemi yapılandırma dosyası.
