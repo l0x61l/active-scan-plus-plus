@@ -14,6 +14,7 @@ try: #eklentinin Python ile uyumlu şekilde çalışmasını sağlamak için ekl
     import traceback #hataları yakalamak ve hata raporları oluşturmak için kullanılır.
     from string import Template #Dinamik metin şablonları oluşturur. Web güvenlik testlerinde, dinamik istek veya yanıt metinleri oluşturmak için kullanılır
     from cgi import escape #HTML entity escaping için kullanılır
+    import json #JSON dosyalırıyla çalışmak için kullanılır
 
     from burp import IBurpExtender, IScannerInsertionPointProvider, IScannerInsertionPoint, IParameter, IScannerCheck, \
         IScanIssue #eklentilerin Burp Suite içindeki tarayıcıya, proxy'ye ve diğer modüllere erişmesini için kullanılır.
@@ -81,74 +82,18 @@ class PerHostScans(IScannerCheck):
         issues = []  #Bulunan sorunların listesi.
         issues.extend(self.interestingFileScan(basePair))  #İlginç dosya tarama sonuçları eklenir.
         return issues  #Bulunan tüm sorunlar döndürülür.
-        
-    interestingFileMappings2 = [
-        #Sürüm kontrol sistemleri ve kaynak kod sızıntıları
-        ['/.git/config', '[core]', 'source code leak?'],    #Git sürüm kontrol sistemi yapılandırma dosyası.
-        ['/.svn/entries', '<dir>', 'SVN source code leak'],     #SVN sürüm kontrol sistemine ait girişler.
-        ['/.hg/hgrc', '[paths]', 'Mercurial repository configuration'],     #Mercurial repository yapılandırma dosyası.
-        ['/.gitignore', '*.log', 'Potential ignored files information'],    #Git tarafından yoksayılan dosyalar hakkında bilgi.
 
-        #Yedekleme dosyaları
-        ['/backup.zip', 'PK', 'Potential backup file'],     #Potansiyel bir yedekleme dosyası.
-        ['/db_backup.sql', 'CREATE TABLE', 'Database backup'],      #Veritabanı yedekleme dosyası.
-        ['/site-backup.tar.gz', 'gzip', 'Compressed site backup'],      #Sıkıştırılmış site yedeği.
-
-        #Konfigürasyon dosyaları
-        ['/config.php', '<?php', 'PHP configuration file'],     #PHP uygulama yapılandırması.
-        ['/.env', '=', 'Environment configuration'],    #Ortam değişkenlerini içeren yapılandırma dosyası.
-        ['/web.config', '<configuration>', 'IIS configuration file'],   #Microsoft IIS yapılandırma dosyası.
-        ['/settings.yaml', ':', 'YAML settings file'],      #YAML formatında ayar dosyası.
-
-        #Log dosyaları
-        ['/error.log', 'PHP Fatal error', 'Error logs may contain sensitive information'],      #Hata günlük dosyası.
-        ['/access.log', 'HTTP/1.1', 'Access logs may leak user data'],      #Erişim günlük dosyası.
-        ['/debug.log', '[DEBUG]', 'Debug log file'],    #Debug amaçlı oluşturulan günlük dosyası.
-        ['/app.log', '[INFO]', 'Application log file'],     #Uygulama günlük dosyası.
-
-        #Framework ve teknolojiye özgü dosyalar
-        ['/phpinfo.php', '<title>phpinfo()</title>', 'Detailed PHP environment information'],   #PHP'nin yapılandırma bilgileri.
-        ['/server-status', 'Server uptime', 'Apache server status'],    #Apache sunucu durumu.
-        ['/.well-known/security.txt', 'Contact:', 'Security policy'],   #Güvenlik politikası ile ilgili dosya.
-        ['/.well-known/openid-configuration', '"authorization_endpoint"', 'OAuth2 configuration'],      #OAuth2 yapılandırma dosyası.
-
-        #API ve token bilgileri
-        ['/api-keys.json', '{', 'API keys file'],   #API anahtarlarını içerebilecek bir JSON dosyası.
-        ['/firebase-config.json', '{', 'Firebase configuration'],   #Firebase yapılandırma dosyası.
-        ['/keys.txt', '=', 'Plaintext API keys or secrets'],    #Düz metin API anahtarları veya sırlar.
-
-        #Diğer ilginç dosyalar
-        ['/robots.txt', 'Disallow:', 'Potential hidden endpoints'],     #Arama motorlarından gizlenen endpoint'ler.
-        ['/crossdomain.xml', '<cross-domain-policy>', 'Flash cross-domain policy'],     #Flash uygulamaları için izin verilen alanlar.
-        ['/sitemap.xml', '<url>', 'Sitemap that may reveal structure'],     #Web sitesinin URL yapısını gösterebilecek site haritası.
-        ['/ads.txt', 'DIRECT', 'Advertising networks configuration'],   #Reklam ağı yapılandırma dosyası.
-
-        #Veritabanı dosyaları
-        ['/db.sqlite3', 'SQLite format', 'SQLite database file'],   #SQLite veritabanı dosyası.
-        ['/data.mdb', 'Standard Jet DB', 'Microsoft Access database file'],     #Microsoft Access veritabanı dosyası.
-        ['/database.json', '{', 'JSON formatted database export'],      #JSON formatında veritabanı dosyası.
-
-        #Sensitif endpoint'ler
-        ['/admin/', '<title>Admin</title>', 'Administrator panel'],     #Yönetici paneli.
-        ['/login', 'Password', 'Potential login page'],     #Potansiyel giriş sayfası.
-        ['/signup', 'Register', 'Potential registration page'],     #Potansiyel kayıt sayfası.
-        ['/forgot-password', 'Email', 'Password recovery endpoint'],    #Şifre sıfırlama endpoint'i.
-
-        #Cloud ve hosting konfigürasyonları
-        ['/aws/credentials', '[default]', 'AWS credentials file'],      #AWS kimlik bilgileri.
-        ['/google-cloud.json', '{', 'Google Cloud credentials'],    #Google Cloud kimlik bilgileri.
-        ['/azure-key-vault', '{', 'Azure Key Vault configuration'],     #Azure Key Vault yapılandırması.
-
-        #Eski ve atık dosyalar
-        ['/index.html.bak', '<html>', 'Potential backup of HTML file'],     #HTML dosyasının yedeği.
-        ['/old-index.html', '<html>', 'Outdated HTML file'],    #Eski bir HTML dosyası.
-        ['/test.php', '<?php', 'Testing PHP script'],   #Test amaçlı bırakılmış PHP dosyası.
-        ['/debug.php', '<?php', 'Debugging PHP script'],    #Debug amaçlı bırakılmış PHP dosyası.
-    ]
+    def load_mappings(self):
+        with open(self.mappings_file, 'r') as file:
+            return json.load(file)
 
     def interestingFileScan(self, basePair):
         issues = []  #Bulunan sorunların listesi.
-        for (url, expect, reason) in self.interestingFileMappings:  #Her dosya için tarama yapılır.
+        interestingFileMappings = load_mappings()
+        for mapping in interestingFileMappings:  #Her dosya için tarama yapılır.           
+            url = mapping['url']
+            expect = mapping['expect']
+            reason = mapping['reason']
             attack = self.fetchURL(basePair, url)  #İlgili URL’den HTTP isteği yapılır.
             if expect in safe_bytes_to_string(attack.getResponse()):  #Yanıtta beklenen içerik var mı kontrol edilir.
                 #Yanlış pozitifleri önlemek için URL biraz değiştirilerek yeniden kontrol yapılır.
@@ -179,6 +124,7 @@ class PerHostScans(IScannerCheck):
 class PerRequestScans(IScannerCheck):  #Burp Suite taramaları için her HTTP isteği üzerinde işlem yapan sınıf.
 
     def __init__(self):  #Sınıf başlatıldığında tarama kontrol fonksiyonlarını ayarlar.
+        self.mappings_file = "interestingFileMappings.json"
         self.scan_checks = [  #Gerçekleştirilecek tarama fonksiyonlarının listesi.
             self.doHostHeaderScan,  #Host Header ile ilgili tarama.
             self.doCodePathScan,  #Kod yolu ile ilgili tarama.
