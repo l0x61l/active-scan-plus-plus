@@ -1,5 +1,6 @@
+# -*- coding: utf-8 -*-
 # Author: James Kettle <albinowax+acz@gmail.com>
-#Edited by Atilla Kandil <l0x61l>
+# Edited by Atilla Kandil <l0x61l>
 # Copyright 2014 Context Information Security up to 1.0.5
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,10 +25,13 @@ try:
     import jarray
     import traceback
     import json
+    import os
+    from javax.swing import JPanel, JButton, JTextArea, JScrollPane, JFileChooser, JLabel, JTextField, JOptionPane
+    from java.awt import BorderLayout, GridLayout
     from string import Template
     from cgi import escape
 
-    from burp import IBurpExtender, IScannerInsertionPointProvider, IScannerInsertionPoint, IParameter, IScannerCheck, \
+    from burp import IBurpExtender, IScannerInsertionPointProvider, IScannerInsertionPoint, IParameter, IScannerCheck, ITab, \
         IScanIssue
     import jarray
 except ImportError:
@@ -39,6 +43,12 @@ DEBUG = False
 callbacks = None
 helpers = None
 
+from javax.swing import JPanel, JButton, JTextArea, JScrollPane, JFileChooser, JLabel, JTextField, JOptionPane
+from java.awt import BorderLayout, GridLayout
+from burp import IBurpExtender, ITab
+import json
+import os
+
 def safe_bytes_to_string(bytes):
     if bytes is None:
         bytes = ''
@@ -47,13 +57,16 @@ def safe_bytes_to_string(bytes):
 def html_encode(string):
     return string.replace("<", "&lt;").replace(">", "&gt;")
 
-class BurpExtender(IBurpExtender):
+class BurpExtender(IBurpExtender, ITab):
+    
     def registerExtenderCallbacks(self, this_callbacks):
         global callbacks, helpers
         callbacks = this_callbacks
         helpers = callbacks.getHelpers()
         callbacks.setExtensionName("activeScan++")
-
+        self.mappings_file = "interestingFileMappings.json"
+        self.panel = None
+        self.buildUI()
         # gracefully skip checks requiring Collaborator if it's disabled
         collab_enabled = True
         if '"type":"none"' in callbacks.saveConfigAsJson("project_options.misc.collaborator_server"):
@@ -76,9 +89,91 @@ class BurpExtender(IBurpExtender):
                 callbacks.registerScannerCheck(Solr())
                 callbacks.registerScannerCheck(doStruts_2017_12611_scan())
 
-        print "Successfully loaded activeScan++ v" + VERSION
+        callbacks.addSuiteTab(self)
+        print "Successfully loaded activeScan++ v" + VERSION + " Atilla Kandil Edition 3.0"
 
         return
+
+    def buildUI(self):
+        self.panel = JPanel(BorderLayout())
+
+        # Top Panel for Instructions
+        top_panel = JPanel(BorderLayout())
+        instruction_label = JLabel("Edit the interestingFileMappings.json file:")
+        top_panel.add(instruction_label, BorderLayout.NORTH)
+
+        # Text Area for File Content
+        self.text_area = JTextArea(20, 60)
+        self.text_area.setLineWrap(True)
+        self.text_area.setWrapStyleWord(True)
+        scroll_pane = JScrollPane(self.text_area)
+
+        # Load JSON File Content
+        self.loadFileContent()
+
+        # Buttons
+        button_panel = JPanel(GridLayout(1, 3))
+        load_button = JButton("Load File", actionPerformed=self.loadFileContent)
+        save_button = JButton("Save Changes", actionPerformed=self.saveFileContent)
+        add_entry_button = JButton("Add Entry", actionPerformed=self.addEntry)
+        button_panel.add(load_button)
+        button_panel.add(save_button)
+        button_panel.add(add_entry_button)
+
+        # Assemble Panels
+        self.panel.add(top_panel, BorderLayout.NORTH)
+        self.panel.add(scroll_pane, BorderLayout.CENTER)
+        self.panel.add(button_panel, BorderLayout.SOUTH)
+
+    def loadFileContent(self, event=None):
+        try:
+            if os.path.exists(self.mappings_file):
+                with open(self.mappings_file, 'r') as file:
+                    content = json.dumps(json.load(file), indent=4)
+                    self.text_area.setText(content)
+                    print("File content loaded successfully.")
+            else:
+                self.text_area.setText("[]")  # Start with an empty JSON array
+        except Exception as e:
+            print("Failed to load file content: %s" % e)
+            JOptionPane.showMessageDialog(None, "Error loading file: %s" % e, "Error", JOptionPane.ERROR_MESSAGE)
+
+    def saveFileContent(self, event=None):
+        try:
+            content = self.text_area.getText()
+            json_data = json.loads(content)  # Validate JSON format
+            with open(self.mappings_file, 'w') as file:
+                json.dump(json_data, file, indent=4)
+                print("File saved successfully.")
+                JOptionPane.showMessageDialog(None, "File saved successfully.", "Info", JOptionPane.INFORMATION_MESSAGE)
+        except Exception as e:
+            print("Failed to save file content: %s" % e)
+            JOptionPane.showMessageDialog(None, "Error saving file: %s" % e, "Error", JOptionPane.ERROR_MESSAGE)
+
+    def addEntry(self, event=None):
+        url = JOptionPane.showInputDialog("Enter the URL:")
+        expect = JOptionPane.showInputDialog("Enter the expected response content:")
+        reason = JOptionPane.showInputDialog("Enter the reason for checking this URL:")
+
+        if url and expect and reason:
+            new_entry = {"url": url, "expect": expect, "reason": reason}
+            try:
+                content = self.text_area.getText()
+                json_data = json.loads(content)
+                json_data.append(new_entry)
+                self.text_area.setText(json.dumps(json_data, indent=4))
+                print("New entry added.")
+            except Exception as e:
+                print("Failed to add new entry: %s" % e)
+                JOptionPane.showMessageDialog(None, "Error adding entry: %s" % e, "Error", JOptionPane.ERROR_MESSAGE)
+        else:
+            JOptionPane.showMessageDialog(None, "All fields are required.", "Warning", JOptionPane.WARNING_MESSAGE)
+
+    def getTabCaption(self):
+        return "ActiveScan++ Mapping Editor"
+
+    def getUiComponent(self):
+        return self.panel
 
 
 class PerHostScans(IScannerCheck):
@@ -90,8 +185,9 @@ class PerHostScans(IScannerCheck):
     def doActiveScan(self, basePair, insertionPoint):
         host = basePair.getHttpService().getHost()
         if host in self.scanned_hosts:
+            print("Previously Scanned")
             return []
-
+        print("ActiveScan Started...")
         self.scanned_hosts.add(host)
         issues = []
         issues.extend(self.interestingFileScan(basePair))
@@ -99,24 +195,29 @@ class PerHostScans(IScannerCheck):
 
 
     def load_mappings(self):
-        with open(self.mappings_file, 'r') as file:
-            return json.load(file)
-
+        try:
+            with open(self.mappings_file, 'r') as file:
+                return json.load(file)
+        except Exception as e:
+            print("Error Loading Mappings File")
+            return []
 
     def interestingFileScan(self, basePair):
         issues = []
-        interestingFileMappings = load_mappings()
+        self.mappings_file = "interestingFileMappings.json"
+        interestingFileMappings = self.load_mappings()
+        print("interestingFileScan Started...")
         for mapping in interestingFileMappings:          
             url = mapping['url']
             expect = mapping['expect']
             reason = mapping['reason']
             attack = self.fetchURL(basePair, url)
             if expect in safe_bytes_to_string(attack.getResponse()):
-
+                print("Matched in response\n")
                 # prevent false positives by tweaking the URL and confirming the expected string goes away
-                baseline_1 = self.fetchURL(basePair, url + '123')
-                baseline_2 = self.fetchURL(basePair, url + '?asd=123')
-                if expect not in safe_bytes_to_string(baseline_1.getResponse()) and expect not in safe_bytes_to_string(baseline_2.getResponse()):
+                baseline = self.fetchURL(basePair, url[:-1])
+                if expect not in safe_bytes_to_string(baseline.getResponse()):
+                    print("---Did NOT false positive\n")
                     issues.append(
                         CustomScanIssue(basePair.getHttpService(), helpers.analyzeRequest(attack).getUrl(),
                                         [attack, baseline],
@@ -124,7 +225,9 @@ class PerHostScans(IScannerCheck):
                                         "The response to <b>"+html_encode(url)+"</b> contains <b>'"+html_encode(expect)+"'</b><br/><br/>This may be interesting. Here's a clue why: <b>"+html_encode(reason)+"</b>",
                                         'Firm', 'Information')
                     )
-
+                    print("-----"+html_encode(url)+" "+html_encode(reason)+" Issues Listed\n")
+            else:
+                print("Did NOT match in response\n")
 
         return issues
 
@@ -140,6 +243,7 @@ class PerRequestScans(IScannerCheck):
 
     def __init__(self):
         self.mappings_file = "interestingFileMappings.json"
+        self.panel = None
         self.scan_checks = [
             self.doHostHeaderScan,
             self.doCodePathScan,
